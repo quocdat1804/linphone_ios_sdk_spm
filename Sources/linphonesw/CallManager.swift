@@ -23,8 +23,9 @@ import UserNotifications
 import os
 import CallKit
 import AVFoundation
+import UIKit
 
-@objc class CallAppData: NSObject {
+@objc public class CallAppData: NSObject {
     @objc var batteryWarningShown = false
     @objc var videoRequested = false /*set when user has requested for video*/
     @objc var isConference = false
@@ -35,7 +36,7 @@ import AVFoundation
  * CallManager is a class that manages application calls and supports callkit.
  * There is only one CallManager by calling CallManager.instance().
  */
-@objc class CallManager: NSObject, CoreDelegate {
+@objc public class CallManager: NSObject, CoreDelegate {
     static var theCallManager: CallManager?
     let providerDelegate: ProviderDelegate! // to support callkit
     let callController: CXCallController! // to support callkit
@@ -135,15 +136,6 @@ import AVFoundation
         }
     }
 
-    @objc static func callKitEnabled() -> Bool {
-#if !targetEnvironment(simulator)
-        if ConfigManager.instance().lpConfigBoolForKey(key: "use_callkit", section: "app") {
-            return true
-        }
-#endif
-        return false
-    }
-
     @objc func changeRouteToSpeaker() {
         lc?.outputAudioDevice = lc?.audioDevices.first { $0.type == AudioDeviceType.Speaker }
         UIDevice.current.isProximityMonitoringEnabled = false
@@ -192,9 +184,9 @@ import AVFoundation
     func requestTransaction(_ transaction: CXTransaction, action: String) {
         callController.request(transaction) { error in
             if let error = error {
-                Log.directLog(BCTBX_LOG_ERROR, text: "CallKit: Requested transaction \(action) failed because: \(error)")
+                LoggingService.Instance.error(message: "CallKit: Requested transaction \(action) failed because: \(error)")
             } else {
-                Log.directLog(BCTBX_LOG_MESSAGE, text: "CallKit: Requested transaction \(action) successfully")
+                LoggingService.Instance.message(message: "CallKit: Requested transaction \(action) successfully")
             }
         }
     }
@@ -224,7 +216,7 @@ import AVFoundation
 
     @objc func acceptCall(call: OpaquePointer?, hasVideo:Bool) {
         if (call == nil) {
-            Log.directLog(BCTBX_LOG_ERROR, text: "Can not accept null call!")
+            LoggingService.Instance.error(message: "Can not accept null call!")
             return
         }
         let call = Call.getSwiftObject(cObject: call!)
@@ -259,25 +251,25 @@ import AVFoundation
                 // Prevent incoming group call to start in audio only layout
                 // Do the same as the conference waiting room
                 callParams.videoEnabled = true
-                callParams.videoDirection = Core.get().videoActivationPolicy?.automaticallyInitiate == true ?  .SendRecv : .RecvOnly
-                Log.i("[Context] Enabling video on call params to prevent audio-only layout when answering")
+                callParams.videoDirection = lc?.videoActivationPolicy?.automaticallyInitiate == true ?  .SendRecv : .RecvOnly
+                LoggingService.Instance.debug(message: "[Context] Enabling video on call params to prevent audio-only layout when answering")
             }
 
             try call.acceptWithParams(params: callParams)
         } catch {
-            Log.directLog(BCTBX_LOG_ERROR, text: "accept call failed \(error)")
+            LoggingService.Instance.error(message: "accept call failed \(error)")
         }
     }
 
     // for outgoing call. There is not yet callId
     @objc func startCall(addr: OpaquePointer?, isSas: Bool, isVideo: Bool, isConference: Bool = false) {
         if (addr == nil) {
-            Log.i("Can not start a call with null address!")
+            LoggingService.Instance.debug(message: "Can not start a call with null address!")
             return
         }
 
         let sAddr = Address.getSwiftObject(cObject: addr!)
-        if (CallManager.callKitEnabled() && !CallManager.instance().nextCallIsTransfer && lc?.conference?.isIn != true) {
+        if ((lc?.callkitEnabled ?? false) && !CallManager.instance().nextCallIsTransfer && lc?.conference?.isIn != true) {
             let uuid = UUID()
             let name = FastAddressBook.displayName(for: addr) ?? "unknow"
             let handle = CXHandle(type: .generic, value: sAddr.asStringUriOnly())
@@ -300,7 +292,7 @@ import AVFoundation
             let address = try Factory.Instance.createAddress(addr: addr)
             startCall(addr: address.getCobject,isSas: isSas, isVideo: isVideo, isConference:isConference)
         } catch {
-            Log.e("[CallManager] unable to create address for a new outgoing call : \(addr) \(error) ")
+            LoggingService.Instance.error(message: "[CallManager] unable to create address for a new outgoing call : \(addr) \(error) ")
         }
     }
 
@@ -352,7 +344,7 @@ import AVFoundation
                 // We are NOT responsible for creating the AppData.
                 let data = CallManager.getAppData(sCall: call!)
                 if (data == nil) {
-                    Log.directLog(BCTBX_LOG_ERROR, text: "New call instanciated but app data was not set. Expect it to crash.")
+                    LoggingService.Instance.error(message: "New call instanciated but app data was not set. Expect it to crash.")
                     /* will be used later to notify user if video was not activated because of the linphone core*/
                 } else {
                     data!.isConference = isConference
@@ -364,7 +356,7 @@ import AVFoundation
     }
 
     @objc func groupCall() {
-        if (CallManager.callKitEnabled()) {
+        if lc?.callkitEnabled ?? false {
             let calls = lc?.calls
             if (calls == nil || calls!.isEmpty) {
                 return
@@ -374,7 +366,7 @@ import AVFoundation
 
             let currentUuid = CallManager.instance().providerDelegate.uuids["\(firstCall)"]
             if (currentUuid == nil) {
-                Log.directLog(BCTBX_LOG_ERROR, text: "Can not find correspondant call to group.")
+                LoggingService.Instance.error(message: "Can not find correspondant call to group.")
                 return
             }
 
@@ -396,26 +388,26 @@ import AVFoundation
 
     @objc func terminateCall(call: OpaquePointer?) {
         if (call == nil) {
-            Log.directLog(BCTBX_LOG_ERROR, text: "Can not terminate null call!")
+            LoggingService.Instance.error(message: "Can not terminate null call!")
             return
         }
         let call = Call.getSwiftObject(cObject: call!)
         do {
             try call.terminate()
-            Log.directLog(BCTBX_LOG_DEBUG, text: "Call terminated")
+            LoggingService.Instance.debug(message: "Call terminated")
         } catch {
-            Log.directLog(BCTBX_LOG_ERROR, text: "Failed to terminate call failed because \(error)")
+            LoggingService.Instance.error(message: "Failed to terminate call failed because \(error)")
         }
     }
 
     @objc func markCallAsDeclined(callId: String) {
-        if !CallManager.callKitEnabled() {
+        if lc?.callkitEnabled ?? false {
             return
         }
 
         let uuid = providerDelegate.uuids["\(callId)"]
         if (uuid == nil) {
-            Log.directLog(BCTBX_LOG_MESSAGE, text: "Mark call \(callId) as declined.")
+            LoggingService.Instance.message(message: "Mark call \(callId) as declined.")
             let uuid = UUID()
             providerDelegate.uuids.updateValue(uuid, forKey: callId)
             let callInfo = CallInfo.newIncomingCallInfo(callId: callId)
@@ -447,7 +439,7 @@ import AVFoundation
         let callid = call.callLog?.callId ?? ""
         let uuid = providerDelegate.uuids["\(callid)"]
         if (uuid == nil) {
-            Log.directLog(BCTBX_LOG_ERROR, text: "Can not find correspondant call to set held.")
+            LoggingService.Instance.error(message: "Can not find correspondant call to set held.")
             return
         }
         let setHeldAction = CXSetHeldCallAction(call: uuid!, onHold: hold)
@@ -487,7 +479,7 @@ import AVFoundation
         try? sCall.acceptUpdate(params: params)
     }
 
-    func onGlobalStateChanged(core: Core, state: GlobalState, message: String) {
+    public func onGlobalStateChanged(core: Core, state: GlobalState, message: String) {
         if (state == .On) {
             actionsToPerformOnceWhenCoreIsOn.forEach {
                 $0()
@@ -497,7 +489,7 @@ import AVFoundation
         globalState = state
     }
 
-    func onRegistrationStateChanged(core: Core, proxyConfig: ProxyConfig, state: RegistrationState, message: String) {
+    public func onRegistrationStateChanged(core: Core, proxyConfig: ProxyConfig, state: RegistrationState, message: String) {
         if core.proxyConfigList.count == 1 && (state == .Failed || state == .Cleared){
             // terminate callkit immediately when registration failed or cleared, supporting single proxy configuration
             for call in CallManager.instance().providerDelegate.uuids {
@@ -537,7 +529,7 @@ import AVFoundation
         }
     }
 
-    func onCallStateChanged(core: Core, call: Call, state cstate: Call.State, message: String) {
+    public func onCallStateChanged(core: Core, call: Call, state cstate: Call.State, message: String) {
         let callLog = call.callLog
         let callId = callLog?.callId
         if (cstate == .PushIncomingReceived) {
@@ -608,12 +600,12 @@ import AVFoundation
                 }
                 break
             case .StreamsRunning:
-                if (CallManager.callKitEnabled()) {
+                if lc?.callkitEnabled ?? false {
                     let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
                     if (uuid != nil) {
                         let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                         if (callInfo != nil && callInfo!.isOutgoing && !callInfo!.connected) {
-                            Log.directLog(BCTBX_LOG_MESSAGE, text: "CallKit: outgoing call connected with uuid \(uuid!) and callId \(callId!)")
+                            LoggingService.Instance.message(message: "CallKit: outgoing call connected with uuid \(uuid!) and callId \(callId!)")
                             CallManager.instance().providerDelegate.reportOutgoingCallConnected(uuid: uuid!)
                             callInfo!.connected = true
                             CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
@@ -636,7 +628,7 @@ import AVFoundation
                     .OutgoingProgress,
                     .OutgoingRinging,
                     .OutgoingEarlyMedia:
-                if (CallManager.callKitEnabled()) {
+                if lc?.callkitEnabled ?? false {
                     let uuid = CallManager.instance().providerDelegate.uuids[""]
                     if (uuid != nil) {
                         let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
@@ -645,7 +637,7 @@ import AVFoundation
                         CallManager.instance().providerDelegate.uuids.removeValue(forKey: "")
                         CallManager.instance().providerDelegate.uuids.updateValue(uuid!, forKey: callId!)
 
-                        Log.directLog(BCTBX_LOG_MESSAGE, text: "CallKit: outgoing call started connecting with uuid \(uuid!) and callId \(callId!)")
+                        LoggingService.Instance.message(message: "CallKit: outgoing call started connecting with uuid \(uuid!) and callId \(callId!)")
                         CallManager.instance().providerDelegate.reportOutgoingCallStartedConnecting(uuid: uuid!)
                     } else {
                         if CallManager.instance().isConferenceCall(call: call) {
@@ -690,16 +682,16 @@ import AVFoundation
                     let center = UNUserNotificationCenter.current()
                     center.add(request) { (error : Error?) in
                         if error != nil {
-                            Log.directLog(BCTBX_LOG_ERROR, text: "Error while adding notification request : \(error!.localizedDescription)")
+                            LoggingService.Instance.error(message: "Error while adding notification request : \(error!.localizedDescription)")
                         }
                     }
                 }
 
-                if (CallManager.callKitEnabled()) {
+                if lc?.callkitEnabled ?? false {
                     var uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
                     if (callId == CallManager.instance().referedToCall) {
                         // refered call ended before connecting
-                        Log.directLog(BCTBX_LOG_MESSAGE, text: "Callkit: end refered to call :  \(String(describing: CallManager.instance().referedToCall))")
+                        LoggingService.Instance.message(message: "Callkit: end refered to call :  \(String(describing: CallManager.instance().referedToCall))")
                         CallManager.instance().referedFromCall = nil
                         CallManager.instance().referedToCall = nil
                     }
@@ -709,7 +701,7 @@ import AVFoundation
                     }
                     if (uuid != nil) {
                         if (callId == CallManager.instance().referedFromCall) {
-                            Log.directLog(BCTBX_LOG_MESSAGE, text: "Callkit: end refered from call : \(String(describing: CallManager.instance().referedFromCall))")
+                            LoggingService.Instance.message(message: "Callkit: end refered from call : \(String(describing: CallManager.instance().referedFromCall))")
                             CallManager.instance().referedFromCall = nil
                             let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                             callInfo!.callId = CallManager.instance().referedToCall ?? ""
@@ -782,7 +774,7 @@ import AVFoundation
     // Local Conference
 
     @objc func startLocalConference() {
-        if (CallManager.callKitEnabled()) {
+        if lc?.callkitEnabled ?? false {
             let calls = lc?.calls
             if (calls == nil || calls!.isEmpty) {
                 return
@@ -792,7 +784,7 @@ import AVFoundation
 
             let currentUuid = CallManager.instance().providerDelegate.uuids["\(firstCall)"]
             if (currentUuid == nil) {
-                Log.directLog(BCTBX_LOG_ERROR, text: "Can not find correspondant call to group.")
+                LoggingService.Instance.error(message: "Can not find correspondant call to group.")
                 return
             }
 
@@ -816,7 +808,7 @@ import AVFoundation
                 try conference?.addParticipants(calls: core.calls)
             }
         } catch {
-            Log.directLog(BCTBX_LOG_ERROR, text: "accept call failed \(error)")
+            LoggingService.Instance.error(message: "accept call failed \(error)")
         }
     }
 
@@ -827,5 +819,3 @@ import AVFoundation
         return true; // Legacy behavior
     }
 }
-
-
