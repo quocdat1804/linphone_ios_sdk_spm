@@ -29,7 +29,12 @@ import UIKit
     @objc var batteryWarningShown = false
     @objc var videoRequested = false /*set when user has requested for video*/
     @objc var isConference = false
+}
 
+public protocol Logger {
+    func error(_ message: String)
+    func debug(_ message: String)
+    func message(_ message: String)
 }
 
 /*
@@ -40,7 +45,7 @@ import UIKit
     static var theCallManager: CallManager?
     let providerDelegate: ProviderDelegate! // to support callkit
     let callController: CXCallController! // to support callkit
-    var lc: Core?
+    public var lc: Core?
     @objc var speakerBeforePause : Bool = false
     @objc var nextCallIsTransfer: Bool = false
     var referedFromCall: String?
@@ -57,18 +62,29 @@ import UIKit
     var backgroundContextCall : Call?
     @objc var backgroundContextCameraIsEnabled : Bool = false
 
+    var logger: Logger? = nil
+
     fileprivate override init() {
         providerDelegate = ProviderDelegate.shared
         callController = CXCallController()
     }
 
-    @objc static func instance() -> CallManager {
+    @objc public static func instance() -> CallManager {
         if (theCallManager == nil) {
             theCallManager = CallManager()
         }
         return theCallManager!
     }
 
+    public func setLogger(_ logger: Logger) {
+        self.logger = logger
+        providerDelegate.logger = logger
+    }
+
+    public func setCore(withCore core: Core) {
+        lc = core
+        lc?.addDelegate(delegate: self)
+    }
 
     @objc func setCore(core: OpaquePointer) {
         lc = Core.getSwiftObject(cObject: core)
@@ -108,13 +124,13 @@ import UIKit
         return call?.getCobject
     }
 
-    func callByCallId(callId: String?) -> Call? {
+    public func callByCallId(callId: String?) -> Call? {
         if (callId == nil) {
             return nil
         }
         let calls = lc?.calls
         if let callTmp = calls?.first(where: { $0.callLog?.callId == callId }) {
-            return callTmp
+        return callTmp
         }
         return nil
     }
@@ -136,12 +152,17 @@ import UIKit
         }
     }
 
-    @objc func changeRouteToSpeaker() {
+    @objc public func changeRouteToMicrophone() {
+        lc?.outputAudioDevice = lc?.audioDevices.first { $0.type == AudioDeviceType.Microphone }
+        UIDevice.current.isProximityMonitoringEnabled = true
+    }
+
+    @objc public func changeRouteToSpeaker() {
         lc?.outputAudioDevice = lc?.audioDevices.first { $0.type == AudioDeviceType.Speaker }
         UIDevice.current.isProximityMonitoringEnabled = false
     }
 
-    @objc func changeRouteToBluetooth() {
+    @objc public func changeRouteToBluetooth() {
         lc?.outputAudioDevice = lc?.audioDevices.first { $0.type == AudioDeviceType.BluetoothA2DP || $0.type == AudioDeviceType.Bluetooth }
         UIDevice.current.isProximityMonitoringEnabled = (lc!.callsNb > 0)
     }
@@ -184,9 +205,9 @@ import UIKit
     func requestTransaction(_ transaction: CXTransaction, action: String) {
         callController.request(transaction) { error in
             if let error = error {
-                LoggingService.Instance.error(message: "CallKit: Requested transaction \(action) failed because: \(error)")
+                self.logger?.error("[LinphoneCallManager] CallKit: Requested transaction \(action) failed because: \(error)")
             } else {
-                LoggingService.Instance.message(message: "CallKit: Requested transaction \(action) successfully")
+                self.logger?.message("[LinphoneCallManager] CallKit: Requested transaction \(action) successfully")
             }
         }
     }
@@ -204,74 +225,77 @@ import UIKit
         }
     }
 
-    func displayIncomingCall(call:Call?, handle: String, hasVideo: Bool, callId: String, displayName:String) {
+    public func displayIncomingCall(call:Call?, handle: String, hasVideo: Bool, callId: String, phoneNumber: String, displayName: String) {
         let uuid = UUID()
         let callInfo = CallInfo.newIncomingCallInfo(callId: callId)
+        callInfo.phoneNumber = phoneNumber
+        callInfo.displayName = displayName
 
         providerDelegate.callInfos.updateValue(callInfo, forKey: uuid)
         providerDelegate.uuids.updateValue(uuid, forKey: callId)
         providerDelegate.reportIncomingCall(call:call, uuid: uuid, handle: handle, hasVideo: hasVideo, displayName: displayName)
-
     }
 
     @objc func acceptCall(call: OpaquePointer?, hasVideo:Bool) {
         if (call == nil) {
-            LoggingService.Instance.error(message: "Can not accept null call!")
+            logger?.error("[LinphoneCallManager] Can not accept null call!")
             return
         }
         let call = Call.getSwiftObject(cObject: call!)
         acceptCall(call: call, hasVideo: hasVideo)
     }
 
-    func acceptCall(call: Call, hasVideo:Bool) {
+    public func acceptCall(call: Call, hasVideo:Bool) {
         do {
             let callParams = try lc!.createCallParams(call: call)
             callParams.videoEnabled = hasVideo
-            if (ConfigManager.instance().lpConfigBoolForKey(key: "edge_opt_preference")) {
-                let low_bandwidth = (AppManager.network() == .network_2g)
-                if (low_bandwidth) {
-                    Log.directLog(BCTBX_LOG_MESSAGE, text: "Low bandwidth mode")
-                }
-                callParams.lowBandwidthEnabled = low_bandwidth
-            }
 
-            //We set the record file name here because we can't do it after the call is started.
-            let address = call.callLog?.fromAddress
-            let writablePath = AppManager.recordingFilePathFromCall(address: address?.username ?? "")
-            Log.directLog(BCTBX_LOG_MESSAGE, text: "Record file path: \(String(describing: writablePath))")
-            callParams.recordFile = writablePath
+            // if (ConfigManager.instance().lpConfigBoolForKey(key: "edge_opt_preference")) {
+            //     let low_bandwidth = (AppManager.network() == .network_2g)
+            //     if (low_bandwidth) {
+            //         logger?.message("[LinphoneCallManager] Low bandwidth mode")
+            //     }
+            //     callParams.lowBandwidthEnabled = low_bandwidth
+            // }
+
+            // //We set the record file name here because we can't do it after the call is started.
+            // let address = call.callLog?.fromAddress
+            // let writablePath = AppManager.recordingFilePathFromCall(address: address?.username ?? "")
+            // logger?.message("[LinphoneCallManager] Record file path: \(String(describing: writablePath))")
+            // callParams.recordFile = writablePath
 
 
-            if let chatView : ChatConversationView = PhoneMainView.instance().VIEW(ChatConversationView.compositeViewDescription()), chatView.isVoiceRecording {
-                Log.directLog(BCTBX_LOG_MESSAGE, text: "Voice recording in progress, stopping it befoce accepting the call.")
-                chatView.stopVoiceRecording()
-            }
+            // if let chatView : ChatConversationView = PhoneMainView.instance().VIEW(ChatConversationView.compositeViewDescription()), chatView.isVoiceRecording {
+            //     logger?.message("[LinphoneCallManager] Voice recording in progress, stopping it befoce accepting the call.")
+            //     chatView.stopVoiceRecording()
+            // }
 
             if (call.callLog?.wasConference() == true) {
                 // Prevent incoming group call to start in audio only layout
                 // Do the same as the conference waiting room
                 callParams.videoEnabled = true
                 callParams.videoDirection = lc?.videoActivationPolicy?.automaticallyInitiate == true ?  .SendRecv : .RecvOnly
-                LoggingService.Instance.debug(message: "[Context] Enabling video on call params to prevent audio-only layout when answering")
+                logger?.debug("[LinphoneCallManager] [Context] Enabling video on call params to prevent audio-only layout when answering")
             }
 
             try call.acceptWithParams(params: callParams)
         } catch {
-            LoggingService.Instance.error(message: "accept call failed \(error)")
+            logger?.error("[LinphoneCallManager] Accept call failed \(error)")
         }
     }
 
     // for outgoing call. There is not yet callId
     @objc func startCall(addr: OpaquePointer?, isSas: Bool, isVideo: Bool, isConference: Bool = false) {
         if (addr == nil) {
-            LoggingService.Instance.debug(message: "Can not start a call with null address!")
+            logger?.debug("[LinphoneCallManager] Can not start a call with null address!")
             return
         }
 
         let sAddr = Address.getSwiftObject(cObject: addr!)
         if ((lc?.callkitEnabled ?? false) && !CallManager.instance().nextCallIsTransfer && lc?.conference?.isIn != true) {
             let uuid = UUID()
-            let name = FastAddressBook.displayName(for: addr) ?? "unknow"
+            let name = "Unknown"
+            // let name = FastAddressBook.displayName(for: addr) ?? "Unknown"
             let handle = CXHandle(type: .generic, value: sAddr.asStringUriOnly())
             let startCallAction = CXStartCallAction(call: uuid, handle: handle)
             let transaction = CXTransaction(action: startCallAction)
@@ -292,50 +316,52 @@ import UIKit
             let address = try Factory.Instance.createAddress(addr: addr)
             startCall(addr: address.getCobject,isSas: isSas, isVideo: isVideo, isConference:isConference)
         } catch {
-            LoggingService.Instance.error(message: "[CallManager] unable to create address for a new outgoing call : \(addr) \(error) ")
+            logger?.error("[LinphoneCallManager] Unable to create address for a new outgoing call : \(addr) \(error) ")
         }
     }
 
     func doCall(addr: Address, isSas: Bool, isVideo: Bool, isConference:Bool = false) throws {
-        let displayName = FastAddressBook.displayName(for: addr.getCobject)
+        // let displayName = FastAddressBook.displayName(for: addr.getCobject)
+
+        // if (displayName != nil) {
+        //     try addr.setDisplayname(newValue: displayName!)
+        // }
 
         let lcallParams = try CallManager.instance().lc!.createCallParams(call: nil)
-        if ConfigManager.instance().lpConfigBoolForKey(key: "edge_opt_preference") && AppManager.network() == .network_2g {
-            Log.directLog(BCTBX_LOG_MESSAGE, text: "Enabling low bandwidth mode")
-            lcallParams.lowBandwidthEnabled = true
-        }
 
-        if (displayName != nil) {
-            try addr.setDisplayname(newValue: displayName!)
-        }
+        // if ConfigManager.instance().lpConfigBoolForKey(key: "edge_opt_preference") && AppManager.network() == .network_2g {
+        //     logger?.message("[LinphoneCallManager] Enabling low bandwidth mode")
+        //     lcallParams.lowBandwidthEnabled = true
+        // }
 
-        if(ConfigManager.instance().lpConfigBoolForKey(key: "override_domain_with_default_one")) {
-            try addr.setDomain(newValue: ConfigManager.instance().lpConfigStringForKey(key: "domain", section: "assistant"))
-        }
+        // if(ConfigManager.instance().lpConfigBoolForKey(key: "override_domain_with_default_one")) {
+        //     try addr.setDomain(newValue: ConfigManager.instance().lpConfigStringForKey(key: "domain", section: "assistant"))
+        // }
 
         if (CallManager.instance().nextCallIsTransfer) {
             let call = CallManager.instance().lc!.currentCall
             try call?.transferTo(referTo: addr)
             CallManager.instance().nextCallIsTransfer = false
         } else {
-            //We set the record file name here because we can't do it after the call is started.
-            let writablePath = AppManager.recordingFilePathFromCall(address: addr.username )
-            Log.directLog(BCTBX_LOG_DEBUG, text: "record file path: \(writablePath)")
-            lcallParams.recordFile = writablePath
+            // //We set the record file name here because we can't do it after the call is started.
+            // let writablePath = AppManager.recordingFilePathFromCall(address: addr.username)
+            // logger?.debug("[LinphoneCallManager] Record file path: \(writablePath)")
+            // lcallParams.recordFile = writablePath
             if (isSas) {
                 lcallParams.mediaEncryption = .ZRTP
             }
-            if (isConference) {
-                if (ConferenceWaitingRoomViewModel.sharedModel.joinLayout.value! != .AudioOnly) {
-                    lcallParams.videoEnabled = true
-                    lcallParams.videoDirection = ConferenceWaitingRoomViewModel.sharedModel.isVideoEnabled.value == true ? .SendRecv : .RecvOnly
-                    lcallParams.conferenceVideoLayout = ConferenceWaitingRoomViewModel.sharedModel.joinLayout.value! == .Grid ? .Grid : .ActiveSpeaker
-                } else {
-                    lcallParams.videoEnabled = false
-                }
-            } else {
-                lcallParams.videoEnabled = isVideo
-            }
+            // if (isConference) {
+            //     if (ConferenceWaitingRoomViewModel.sharedModel.joinLayout.value! != .AudioOnly) {
+            //         lcallParams.videoEnabled = true
+            //         lcallParams.videoDirection = ConferenceWaitingRoomViewModel.sharedModel.isVideoEnabled.value == true ? .SendRecv : .RecvOnly
+            //         lcallParams.conferenceVideoLayout = ConferenceWaitingRoomViewModel.sharedModel.joinLayout.value! == .Grid ? .Grid : .ActiveSpeaker
+            //     } else {
+            //         lcallParams.videoEnabled = false
+            //     }
+            // } else {
+            //     lcallParams.videoEnabled = isVideo
+            // }
+            lcallParams.videoEnabled = false
 
             let call = CallManager.instance().lc!.inviteAddressWithParams(addr: addr, params: lcallParams)
             if (call != nil) {
@@ -344,7 +370,7 @@ import UIKit
                 // We are NOT responsible for creating the AppData.
                 let data = CallManager.getAppData(sCall: call!)
                 if (data == nil) {
-                    LoggingService.Instance.error(message: "New call instanciated but app data was not set. Expect it to crash.")
+                    logger?.error("[LinphoneCallManager] New call instanciated but app data was not set. Expect it to crash.")
                     /* will be used later to notify user if video was not activated because of the linphone core*/
                 } else {
                     data!.isConference = isConference
@@ -366,7 +392,7 @@ import UIKit
 
             let currentUuid = CallManager.instance().providerDelegate.uuids["\(firstCall)"]
             if (currentUuid == nil) {
-                LoggingService.Instance.error(message: "Can not find correspondant call to group.")
+                logger?.error("[LinphoneCallManager] Can not find correspondant call to group.")
                 return
             }
 
@@ -388,15 +414,15 @@ import UIKit
 
     @objc func terminateCall(call: OpaquePointer?) {
         if (call == nil) {
-            LoggingService.Instance.error(message: "Can not terminate null call!")
+            logger?.error("[LinphoneCallManager] Can not terminate null call!")
             return
         }
         let call = Call.getSwiftObject(cObject: call!)
         do {
             try call.terminate()
-            LoggingService.Instance.debug(message: "Call terminated")
+            logger?.debug("[LinphoneCallManager] Call terminated")
         } catch {
-            LoggingService.Instance.error(message: "Failed to terminate call failed because \(error)")
+            logger?.error("[LinphoneCallManager] Failed to terminate call failed because \(error)")
         }
     }
 
@@ -407,7 +433,7 @@ import UIKit
 
         let uuid = providerDelegate.uuids["\(callId)"]
         if (uuid == nil) {
-            LoggingService.Instance.message(message: "Mark call \(callId) as declined.")
+            logger?.message("[LinphoneCallManager] Mark call \(callId) as declined.")
             let uuid = UUID()
             providerDelegate.uuids.updateValue(uuid, forKey: callId)
             let callInfo = CallInfo.newIncomingCallInfo(callId: callId)
@@ -439,7 +465,7 @@ import UIKit
         let callid = call.callLog?.callId ?? ""
         let uuid = providerDelegate.uuids["\(callid)"]
         if (uuid == nil) {
-            LoggingService.Instance.error(message: "Can not find correspondant call to set held.")
+            logger?.error("[LinphoneCallManager] Can not find correspondant call to set held.")
             return
         }
         let setHeldAction = CXSetHeldCallAction(call: uuid!, onHold: hold)
@@ -516,24 +542,25 @@ import UIKit
     }
 
     func incomingDisplayName(call:Call) -> String {
-        let isConference = isConferenceCall(call: call)
-        let isEarlyConference = isConference && CallsViewModel.shared.currentCallData.value??.isConferenceCall.value != true // Conference info not be received yet.
-        if (isConference) {
-            if (isEarlyConference) {
-                return VoipTexts.conference_incoming_title
-            } else {
-                return "\(VoipTexts.conference_incoming_title):  \(CallsViewModel.shared.currentCallData.value??.remoteConferenceSubject.value ?? "") (\(CallsViewModel.shared.currentCallData.value??.conferenceParticipantsCountLabel.value ?? ""))"
-            }
-        } else {
-            return FastAddressBook.displayName(for: call.remoteAddress?.getCobject) ?? "Unknown"
-        }
+        return "Unknown"
+        // let isConference = isConferenceCall(call: call)
+        // let isEarlyConference = isConference && CallsViewModel.shared.currentCallData.value??.isConferenceCall.value != true // Conference info not be received yet.
+        // if (isConference) {
+        //     if (isEarlyConference) {
+        //         return VoipTexts.conference_incoming_title
+        //     } else {
+        //         return "\(VoipTexts.conference_incoming_title):  \(CallsViewModel.shared.currentCallData.value??.remoteConferenceSubject.value ?? "") (\(CallsViewModel.shared.currentCallData.value??.conferenceParticipantsCountLabel.value ?? ""))"
+        //     }
+        // } else {
+        //     return FastAddressBook.displayName(for: call.remoteAddress?.getCobject) ?? "Unknown"
+        // }
     }
 
     public func onCallStateChanged(core: Core, call: Call, state cstate: Call.State, message: String) {
         let callLog = call.callLog
         let callId = callLog?.callId
         if (cstate == .PushIncomingReceived) {
-            displayIncomingCall(call: call, handle: "Calling", hasVideo: false, callId: callId!, displayName: "Calling")
+            displayIncomingCall(call: call, handle: "Calling", hasVideo: false, callId: callId!, phoneNumber: "", displayName: "Calling")
         } else {
             let video = (core.videoActivationPolicy?.automaticallyAccept ?? false) && (call.remoteParams?.videoEnabled ?? false)
 
@@ -542,11 +569,11 @@ import UIKit
                 CallManager.setAppData(sCall: call, appData: appData)
             }
 
-            if let conference = call.conference, ConferenceViewModel.shared.conference.value == nil {
-                Log.i("[Call] Found conference attached to call and no conference in dedicated view model, init & configure it")
-                ConferenceViewModel.shared.initConference(conference)
-                ConferenceViewModel.shared.configureConference(conference)
-            }
+            // if let conference = call.conference, ConferenceViewModel.shared.conference.value == nil {
+            //     logger?.debug("[LinphoneCallManager] [Call] Found conference attached to call and no conference in dedicated view model, init & configure it")
+            //     ConferenceViewModel.shared.initConference(conference)
+            //     ConferenceViewModel.shared.configureConference(conference)
+            // }
 
             switch cstate {
             case .IncomingReceived:
@@ -559,22 +586,23 @@ import UIKit
                     let uuid = CallManager.instance().providerDelegate.uuids["\(CallManager.uuidReplacedCall)"]
                     let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                     callInfo!.callId = CallManager.instance().referedToCall ?? ""
+                    displayName = callInfo!.displayName ?? "Unknown"
                     CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
                     CallManager.instance().providerDelegate.uuids.removeValue(forKey: callId!)
                     CallManager.instance().providerDelegate.uuids.updateValue(uuid!, forKey: callInfo!.callId)
                     CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: displayName)
-                } else if (CallManager.callKitEnabled()) {
-                    let isConference = isConferenceCall(call: call)
-                    let isEarlyConference = isConference && CallsViewModel.shared.currentCallData.value??.isConferenceCall.value != true // Conference info not be received yet.
-                    if (isEarlyConference) {
-                        CallsViewModel.shared.currentCallData.readCurrentAndObserve { _ in
-                            let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
-                            if (uuid != nil) {
-                                displayName = "\(VoipTexts.conference_incoming_title):  \(CallsViewModel.shared.currentCallData.value??.remoteConferenceSubject.value ?? "") (\(CallsViewModel.shared.currentCallData.value??.conferenceParticipantsCountLabel.value ?? ""))"
-                                CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: displayName)
-                            }
-                        }
-                    }
+                } else if lc?.callkitEnabled ?? false {
+                    // let isConference = isConferenceCall(call: call)
+                    // let isEarlyConference = isConference && CallsViewModel.shared.currentCallData.value??.isConferenceCall.value != true // Conference info not be received yet.
+                    // if (isEarlyConference) {
+                    //     CallsViewModel.shared.currentCallData.readCurrentAndObserve { _ in
+                    //         let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
+                    //         if (uuid != nil) {
+                    //             displayName = "\(VoipTexts.conference_incoming_title):  \(CallsViewModel.shared.currentCallData.value??.remoteConferenceSubject.value ?? "") (\(CallsViewModel.shared.currentCallData.value??.conferenceParticipantsCountLabel.value ?? ""))"
+                    //             CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: displayName)
+                    //         }
+                    //     }
+                    // }
 
                     let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
                     if call.replacedCall == nil {
@@ -582,10 +610,12 @@ import UIKit
                     }
 
                     if (uuid != nil) {
+                        let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                         // Tha app is now registered, updated the call already existed.
-                        CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: displayName)
+                        CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: callInfo?.displayName ?? "Unknown")
                     } else {
-                        CallManager.instance().displayIncomingCall(call: call, handle: addr!.asStringUriOnly(), hasVideo: video, callId: callId!, displayName: displayName)
+//                        let callInfo = CallManager.instance().providerDelegate.callInfos.values.first { $0.callId == callId }
+//                        CallManager.instance().displayIncomingCall(call: call, handle: addr!.asStringUriOnly(), hasVideo: video, callId: callId!, phoneNumber: callInfo?.phoneNumber ?? "", displayName: callInfo?.displayName ?? "Unknown")
                     }
                 } else if (UIApplication.shared.applicationState != .active) {
                     // not support callkit , use notif
@@ -600,18 +630,18 @@ import UIKit
                 }
                 break
             case .StreamsRunning:
-                if lc?.callkitEnabled ?? false {
-                    let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
-                    if (uuid != nil) {
-                        let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
-                        if (callInfo != nil && callInfo!.isOutgoing && !callInfo!.connected) {
-                            LoggingService.Instance.message(message: "CallKit: outgoing call connected with uuid \(uuid!) and callId \(callId!)")
-                            CallManager.instance().providerDelegate.reportOutgoingCallConnected(uuid: uuid!)
-                            callInfo!.connected = true
-                            CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
-                        }
-                    }
-                }
+//                if lc?.callkitEnabled ?? false {
+//                    let uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
+//                    if (uuid != nil) {
+//                        let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
+//                        if (callInfo != nil && callInfo!.isOutgoing && !callInfo!.connected) {
+//                            logger?.message("[LinphoneCallManager] CallKit: outgoing call connected with uuid \(uuid!) and callId \(callId!)")
+//                            CallManager.instance().providerDelegate.reportOutgoingCallConnected(uuid: uuid!)
+//                            callInfo!.connected = true
+//                            CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
+//                        }
+//                    }
+//                }
 
                 if (CallManager.instance().speakerBeforePause) {
                     CallManager.instance().speakerBeforePause = false
@@ -624,43 +654,44 @@ import UIKit
                 actionToFulFill?.fulfill()
                 actionToFulFill = nil
                 break
-            case .OutgoingInit,
-                    .OutgoingProgress,
-                    .OutgoingRinging,
-                    .OutgoingEarlyMedia:
-                if lc?.callkitEnabled ?? false {
-                    let uuid = CallManager.instance().providerDelegate.uuids[""]
-                    if (uuid != nil) {
-                        let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
-                        callInfo!.callId = callId!
-                        CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
-                        CallManager.instance().providerDelegate.uuids.removeValue(forKey: "")
-                        CallManager.instance().providerDelegate.uuids.updateValue(uuid!, forKey: callId!)
-
-                        LoggingService.Instance.message(message: "CallKit: outgoing call started connecting with uuid \(uuid!) and callId \(callId!)")
-                        CallManager.instance().providerDelegate.reportOutgoingCallStartedConnecting(uuid: uuid!)
-                    } else {
-                        if CallManager.instance().isConferenceCall(call: call) {
-                            let uuid = UUID()
-                            let callInfo = CallInfo.newOutgoingCallInfo(addr: call.remoteAddress!, isSas: call.params?.mediaEncryption == .ZRTP, displayName: VoipTexts.conference_default_title, isVideo: call.params?.videoEnabled == true, isConference:true)
-                            CallManager.instance().providerDelegate.callInfos.updateValue(callInfo, forKey: uuid)
-                            CallManager.instance().providerDelegate.uuids.updateValue(uuid, forKey: "")
-                            CallManager.instance().providerDelegate.reportOutgoingCallStartedConnecting(uuid: uuid)
-                            Core.get().activateAudioSession(actived: true)
-                        } else {
-                            CallManager.instance().referedToCall = callId
-                        }
-                    }
-                }
-                break
+//            case .OutgoingInit,
+//                    .OutgoingProgress,
+//                    .OutgoingRinging,
+//                    .OutgoingEarlyMedia:
+//                if lc?.callkitEnabled ?? false {
+//                    let uuid = CallManager.instance().providerDelegate.uuids[""]
+//                    if (uuid != nil) {
+//                        let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
+//                        callInfo!.callId = callId!
+//                        CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
+//                        CallManager.instance().providerDelegate.uuids.removeValue(forKey: "")
+//                        CallManager.instance().providerDelegate.uuids.updateValue(uuid!, forKey: callId!)
+//
+//                        logger?.message("[LinphoneCallManager] CallKit: outgoing call started connecting with uuid \(uuid!) and callId \(callId!)")
+//                        CallManager.instance().providerDelegate.reportOutgoingCallStartedConnecting(uuid: uuid!)
+//                    } else {
+//                        // if CallManager.instance().isConferenceCall(call: call) {
+//                        //     let uuid = UUID()
+//                        //     let callInfo = CallInfo.newOutgoingCallInfo(addr: call.remoteAddress!, isSas: call.params?.mediaEncryption == .ZRTP, displayName: VoipTexts.conference_default_title, isVideo: call.params?.videoEnabled == true, isConference:true)
+//                        //     CallManager.instance().providerDelegate.callInfos.updateValue(callInfo, forKey: uuid)
+//                        //     CallManager.instance().providerDelegate.uuids.updateValue(uuid, forKey: "")
+//                        //     CallManager.instance().providerDelegate.reportOutgoingCallStartedConnecting(uuid: uuid)
+//                        //     lc?.activateAudioSession(actived: true)
+//                        // } else {
+//                            CallManager.instance().referedToCall = callId
+//                        // }
+//                    }
+//                }
+//                break
             case .End,
                     .Error:
                 var displayName = "Unknown"
                 if (call.dir == .Incoming) {
                     displayName = incomingDisplayName(call: call)
-                } else if let addr = call.remoteAddress, let contactName = FastAddressBook.displayName(for: addr.getCobject) {
-                    displayName = contactName
                 }
+                // else if let addr = call.remoteAddress, let contactName = FastAddressBook.displayName(for: addr.getCobject) {
+                //     displayName = contactName
+                // }
 
                 UIDevice.current.isProximityMonitoringEnabled = false
                 if (CallManager.instance().lc!.callsNb == 0) {
@@ -682,7 +713,7 @@ import UIKit
                     let center = UNUserNotificationCenter.current()
                     center.add(request) { (error : Error?) in
                         if error != nil {
-                            LoggingService.Instance.error(message: "Error while adding notification request : \(error!.localizedDescription)")
+                            self.logger?.error("[LinphoneCallManager] Error while adding notification request : \(error!.localizedDescription)")
                         }
                     }
                 }
@@ -691,7 +722,7 @@ import UIKit
                     var uuid = CallManager.instance().providerDelegate.uuids["\(callId!)"]
                     if (callId == CallManager.instance().referedToCall) {
                         // refered call ended before connecting
-                        LoggingService.Instance.message(message: "Callkit: end refered to call :  \(String(describing: CallManager.instance().referedToCall))")
+                        logger?.message("[LinphoneCallManager] Callkit: end refered to call :  \(String(describing: CallManager.instance().referedToCall))")
                         CallManager.instance().referedFromCall = nil
                         CallManager.instance().referedToCall = nil
                     }
@@ -701,10 +732,11 @@ import UIKit
                     }
                     if (uuid != nil) {
                         if (callId == CallManager.instance().referedFromCall) {
-                            LoggingService.Instance.message(message: "Callkit: end refered from call : \(String(describing: CallManager.instance().referedFromCall))")
+                            logger?.message("[LinphoneCallManager] Callkit: end refered from call : \(String(describing: CallManager.instance().referedFromCall))")
                             CallManager.instance().referedFromCall = nil
                             let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                             callInfo!.callId = CallManager.instance().referedToCall ?? ""
+                            displayName = callInfo!.displayName ?? "Unknown"
                             CallManager.instance().providerDelegate.callInfos.updateValue(callInfo!, forKey: uuid!)
                             CallManager.instance().providerDelegate.uuids.removeValue(forKey: callId!)
                             CallManager.instance().providerDelegate.uuids.updateValue(uuid!, forKey: callInfo!.callId)
@@ -752,9 +784,9 @@ import UIKit
 
     // Audio messages
 
-    @objc func activateAudioSession() {
-        lc?.activateAudioSession(actived: true)
-    }
+    // @objc func activateAudioSession() {
+    //     lc?.activateAudioSession(actived: true)
+    // }
 
     @objc func getSpeakerSoundCard() -> String? {
         var speakerCard: String? = nil
@@ -784,7 +816,7 @@ import UIKit
 
             let currentUuid = CallManager.instance().providerDelegate.uuids["\(firstCall)"]
             if (currentUuid == nil) {
-                LoggingService.Instance.error(message: "Can not find correspondant call to group.")
+                logger?.error("[LinphoneCallManager] Can not find correspondant call to group.")
                 return
             }
 
@@ -803,12 +835,12 @@ import UIKit
         do {
             if let core = lc, let params = try? core.createConferenceParams(conference: nil) {
                 params.videoEnabled = false // We disable video for local conferencing (cf Android)
-                params.subject = VoipTexts.conference_local_title
+                // params.subject = VoipTexts.conference_local_title
                 let conference = core.conference != nil ? core.conference : try core.createConferenceWithParams(params: params)
                 try conference?.addParticipants(calls: core.calls)
             }
         } catch {
-            LoggingService.Instance.error(message: "accept call failed \(error)")
+            logger?.error("[LinphoneCallManager] Accept call failed \(error)")
         }
     }
 
@@ -817,5 +849,42 @@ import UIKit
             return params.useInternationalPrefixForCallsAndChats
         }
         return true; // Legacy behavior
+    }
+}
+
+extension CallManager {
+    public func activateAudioIfNeeded(activate: Bool) {
+        if !(lc?.callkitEnabled ?? false) {
+            return
+        }
+
+        let wasActivated = callkitAudioSessionActivated ?? false
+
+        if !wasActivated && activate {
+            logger?.debug("[LinphoneCallManager] Activating audio")
+            lc?.configureAudioSession()
+            lc?.activateAudioSession(actived: true)
+            callkitAudioSessionActivated = true
+        } else if wasActivated && !activate {
+            logger?.debug("[LinphoneCallManager] Deactivating audio")
+            lc?.activateAudioSession(actived: false)
+            callkitAudioSessionActivated = nil
+        }
+    }
+
+    public func callByNumber(caller: String?) -> Call? {
+        if (caller == nil) {
+            return nil
+        }
+        let calls = lc?.calls
+        if let callTmp = calls?.first(where: {
+            guard let callerNo = caller else {
+                return false
+            }
+            return $0.callLog?.fromAddress?.asString().contains(callerNo) ?? false
+        }) {
+            return callTmp
+        }
+        return nil
     }
 }

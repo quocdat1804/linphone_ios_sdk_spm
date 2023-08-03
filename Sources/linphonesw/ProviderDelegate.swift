@@ -31,6 +31,7 @@ import os
     var sasEnabled = false
     var connected = false
     var reason: Reason = Reason.None
+    var phoneNumber: String?
     var displayName: String?
     var videoEnabled = false
     var isConference = false
@@ -61,6 +62,7 @@ public class ProviderDelegate: NSObject {
     let provider: CXProvider
     var uuids: [String : UUID] = [:]
     var callInfos: [UUID : CallInfo] = [:]
+    var logger: Logger? = nil
 
     override init() {
         provider = CXProvider(configuration: ProviderDelegate.providerConfiguration)
@@ -71,7 +73,7 @@ public class ProviderDelegate: NSObject {
     static var providerConfiguration: CXProviderConfiguration  {
         get {
             let providerConfiguration = CXProviderConfiguration(localizedName: Bundle.main.infoDictionary!["CFBundleName"] as! String)
-            providerConfiguration.ringtoneSound = ConfigManager.instance().lpConfigBoolForKey(key: "use_device_ringtone") ? nil : "notes_of_the_optimistic.caf"
+            // providerConfiguration.ringtoneSound = ConfigManager.instance().lpConfigBoolForKey(key: "use_device_ringtone") ? nil : "notes_of_the_optimistic.caf"
             providerConfiguration.supportsVideo = true
             providerConfiguration.iconTemplateImageData = UIImage(named: "callkit_logo")?.pngData()
             providerConfiguration.supportedHandleTypes = [.generic, .phoneNumber, .emailAddress]
@@ -98,7 +100,7 @@ public class ProviderDelegate: NSObject {
 
         let callInfo = callInfos[uuid]
         let callId = callInfo?.callId
-        LoggingService.Instance.message(message: "CallKit: report new incoming call with call-id: [\(String(describing: callId))] and UUID: [\(uuid.description)]")
+        logger?.message("[LinphoneProviderDelegate] CallKit: report new incoming call with call-id: [\(String(describing: callId))] and UUID: [\(uuid.description)]")
         //CallManager.instance().setHeldOtherCalls(exceptCallid: callId ?? "")
         provider.reportNewIncomingCall(with: uuid, update: update) { error in
             if error == nil {
@@ -109,7 +111,7 @@ public class ProviderDelegate: NSObject {
                     }
                 }
             } else {
-                LoggingService.Instance.error(message: "CallKit: cannot complete incoming call with call-id: [\(String(describing: callId))] and UUID: [\(uuid.description)] from [\(handle)] caused by [\(error!.localizedDescription)]")
+                self.logger?.error("[LinphoneProviderDelegate] CallKit: cannot complete incoming call with call-id: [\(String(describing: callId))] and UUID: [\(uuid.description)] from [\(handle)] caused by [\(error!.localizedDescription)]")
                 let code = (error as NSError?)?.code
                 switch code {
                 case CXErrorCodeIncomingCallError.filteredByDoNotDisturb.rawValue:
@@ -154,7 +156,7 @@ public class ProviderDelegate: NSObject {
             }
             let call = CallManager.instance().callByCallId(callId: callId)
             if (call == nil) {
-                LoggingService.Instance.message(message: "CallKit: terminate call with call-id: \(String(describing: callId)) and UUID: \(uuid) which does not exist.")
+                self.logger?.message("[LinphoneProviderDelegate] CallKit: terminate call with call-id: \(String(describing: callId)) and UUID: \(uuid) which does not exist.")
                 CallManager.instance().providerDelegate.endCall(uuid: uuid)
             }
         }
@@ -177,7 +179,7 @@ extension ProviderDelegate: CXProviderDelegate {
         let call = CallManager.instance().callByCallId(callId: callId)
         if let call = call {
             CallManager.instance().terminateCall(call: call.getCobject);
-            LoggingService.Instance.message(message: "CallKit: Call ended with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
+            logger?.message("[LinphoneProviderDelegate] CallKit: Call ended with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
         }
         action.fulfill()
     }
@@ -186,18 +188,24 @@ extension ProviderDelegate: CXProviderDelegate {
         let uuid = action.callUUID
         let callInfo = callInfos[uuid]
         let callId = callInfo?.callId
-        LoggingService.Instance.message(message: "CallKit: answer call with call-id: \(String(describing: callId)) and UUID: \(uuid.description).")
+        logger?.message("[LinphoneProviderDelegate] CallKit: answer call with call-id: \(String(describing: callId)) and UUID: \(uuid.description).")
 
-        let call = CallManager.instance().callByCallId(callId: callId)
+        let call1 = CallManager.instance().callByCallId(callId: callId)
+        let call2 = CallManager.instance().callByNumber(caller: callInfo?.phoneNumber)
+
+        guard let call = (call1 != nil ? call1 : call2) else {
+            logger?.message("[LinphoneProviderDelegate] CallKit: Cannot find call with call-id: \(String(describing: callId)) and UUID: \(uuid.description).")
+            return
+        }
 
         if (UIApplication.shared.applicationState != .active) {
             CallManager.instance().backgroundContextCall = call
-            CallManager.instance().backgroundContextCameraIsEnabled = call?.params?.videoEnabled == true || call?.callLog?.wasConference() == true
-            call?.cameraEnabled = false // Disable camera while app is not on foreground
+            CallManager.instance().backgroundContextCameraIsEnabled = call.params?.videoEnabled == true || call.callLog?.wasConference() == true
+            call.cameraEnabled = false // Disable camera while app is not on foreground
         }
         CallManager.instance().callkitAudioSessionActivated = false
         CallManager.instance().lc?.configureAudioSession()
-        CallManager.instance().acceptCall(call: call!, hasVideo: call!.params?.videoEnabled ?? false)
+        CallManager.instance().acceptCall(call: call, hasVideo: call.params?.videoEnabled ?? false)
         action.fulfill()
     }
 
@@ -207,7 +215,7 @@ extension ProviderDelegate: CXProviderDelegate {
         let call = CallManager.instance().callByCallId(callId: callId)
 
         if (call == nil) {
-            LoggingService.Instance.error(message: "CXSetHeldCallAction: no call !")
+            logger?.error("[LinphoneProviderDelegate] CXSetHeldCallAction: no call !")
             action.fail()
             return
         }
@@ -215,12 +223,12 @@ extension ProviderDelegate: CXProviderDelegate {
         do {
             if (CallManager.instance().lc?.isInConference ?? false && action.isOnHold) {
                 try CallManager.instance().lc?.leaveConference()
-                LoggingService.Instance.debug(message: "CallKit: call-id: [\(String(describing: callId))] leaving conference")
+                logger?.debug("[LinphoneProviderDelegate] CallKit: call-id: [\(String(describing: callId))] leaving conference")
                 NotificationCenter.default.post(name: Notification.Name("LinphoneCallUpdate"), object: self)
                 action.fulfill()
             }else{
                 let state = action.isOnHold ? "Paused" : "Resumed"
-                LoggingService.Instance.debug(message: "CallKit: Call  with call-id: [\(String(describing: callId))] and UUID: [\(uuid)] paused status changed to: [\(state)]")
+                logger?.debug("[LinphoneProviderDelegate] CallKit: Call  with call-id: [\(String(describing: callId))] and UUID: [\(uuid)] paused status changed to: [\(state)]")
                 if (action.isOnHold) {
                     CallManager.instance().speakerBeforePause = CallManager.instance().isSpeakerEnabled()
                     try call!.pause()
@@ -250,14 +258,13 @@ extension ProviderDelegate: CXProviderDelegate {
                         // handler, while it is called from didActivate: audioSession otherwise.
                         // Callkit's design is not consistent, or its documentation imcomplete, wich is somewhat disapointing.
                         //
-                        LoggingService.Instance.debug(message: "Assuming AudioSession is active when executing a CXSetHeldCallAction with isOnHold=false.")
-                        CallManager.instance().lc?.activateAudioSession(actived: true)
-                        CallManager.instance().callkitAudioSessionActivated = true
+                        logger?.debug("[LinphoneProviderDelegate] Assuming AudioSession is active when executing a CXSetHeldCallAction with isOnHold=false.")
+                        CallManager.instance().activateAudioIfNeeded(activate: true)
                     }
                 }
             }
         } catch {
-            LoggingService.Instance.error(message: "CallKit: Call set held (paused or resumed) \(uuid) failed because \(error)")
+            logger?.error("[LinphoneProviderDelegate] CallKit: Call set held (paused or resumed) \(uuid) failed because \(error)")
             action.fail()
         }
     }
@@ -274,21 +281,21 @@ extension ProviderDelegate: CXProviderDelegate {
 
             let addr = callInfo?.toAddr
             if (addr == nil) {
-                LoggingService.Instance.error(message: "CallKit: can not call a null address!")
+                logger?.error("[LinphoneProviderDelegate] CallKit: can not call a null address!")
                 action.fail()
             }
 
             CallManager.instance().lc?.configureAudioSession()
             try CallManager.instance().doCall(addr: addr!, isSas: callInfo?.sasEnabled ?? false, isVideo: callInfo?.videoEnabled ?? false, isConference: callInfo?.isConference ?? false)
         } catch {
-            LoggingService.Instance.error(message: "CallKit: Call started failed because \(error)")
+            logger?.error("[LinphoneProviderDelegate] CallKit: Call started failed because \(error)")
             action.fail()
         }
         action.fulfill()
     }
 
     public func provider(_ provider: CXProvider, perform action: CXSetGroupCallAction) {
-        LoggingService.Instance.message(message: "CallKit: Call grouped callUUid : \(action.callUUID) with callUUID: \(String(describing: action.callUUIDToGroupWith)).")
+        logger?.message("[LinphoneProviderDelegate] CallKit: Call grouped callUUid : \(action.callUUID) with callUUID: \(String(describing: action.callUUIDToGroupWith)).")
         CallManager.instance().addAllToLocalConference()
         action.fulfill()
     }
@@ -296,7 +303,7 @@ extension ProviderDelegate: CXProviderDelegate {
     public func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
         let uuid = action.callUUID
         let callId = callInfos[uuid]?.callId
-        LoggingService.Instance.message(message: "CallKit: Call muted with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
+        logger?.message("[LinphoneProviderDelegate] CallKit: Call muted with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
         CallManager.instance().lc!.micEnabled = !CallManager.instance().lc!.micEnabled
         action.fulfill()
     }
@@ -304,14 +311,14 @@ extension ProviderDelegate: CXProviderDelegate {
     public func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {
         let uuid = action.callUUID
         let callId = callInfos[uuid]?.callId
-        LoggingService.Instance.message(message: "CallKit: Call send dtmf with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
+        logger?.message("[LinphoneProviderDelegate] CallKit: Call send dtmf with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
         let call = CallManager.instance().callByCallId(callId: callId)
         if (call != nil) {
             let digit = (action.digits.cString(using: String.Encoding.utf8)?[0])!
             do {
                 try call!.sendDtmf(dtmf: digit)
             } catch {
-                LoggingService.Instance.error(message: "CallKit: Call send dtmf \(uuid) failed because \(error)")
+                logger?.error("[LinphoneProviderDelegate] CallKit: Call send dtmf \(uuid) failed because \(error)")
             }
         }
         action.fulfill()
@@ -320,23 +327,21 @@ extension ProviderDelegate: CXProviderDelegate {
     public func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
         let uuid = action.uuid
         let callId = callInfos[uuid]?.callId
-        LoggingService.Instance.message(message: "CallKit: Call time out with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
+        logger?.message("[LinphoneProviderDelegate] CallKit: Call time out with call-id: \(String(describing: callId)) an UUID: \(uuid.description).")
         action.fulfill()
     }
 
     public func providerDidReset(_ provider: CXProvider) {
-        LoggingService.Instance.message(message: "CallKit: did reset.")
+        logger?.message("[LinphoneProviderDelegate] CallKit: did reset.")
     }
 
     public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        LoggingService.Instance.message(message: "CallKit: audio session activated.")
-        CallManager.instance().lc?.activateAudioSession(actived: true)
-        CallManager.instance().callkitAudioSessionActivated = true
+        logger?.message("[LinphoneProviderDelegate] CallKit: audio session activated.")
+        CallManager.instance().activateAudioIfNeeded(activate: true)
     }
 
     public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        LoggingService.Instance.message(message: "CallKit: audio session deactivated.")
-        CallManager.instance().lc?.activateAudioSession(actived: false)
-        CallManager.instance().callkitAudioSessionActivated = nil
+        logger?.message("[LinphoneProviderDelegate] CallKit: audio session deactivated.")
+        CallManager.instance().activateAudioIfNeeded(activate: false)
     }
 }
