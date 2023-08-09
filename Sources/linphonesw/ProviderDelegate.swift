@@ -195,6 +195,7 @@ extension ProviderDelegate: CXProviderDelegate {
 
         guard let call = (call1 != nil ? call1 : call2) else {
             logger?.message("[LinphoneProviderDelegate] CallKit: Cannot find call with call-id: \(String(describing: callId)) and UUID: \(uuid.description).")
+            action.fail()
             return
         }
 

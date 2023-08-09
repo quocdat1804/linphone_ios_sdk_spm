@@ -212,7 +212,7 @@ public protocol Logger {
         }
     }
 
-    @objc func updateCallId(previous: String, current: String) {
+    @objc public func updateCallId(previous: String, current: String) {
         let uuid = CallManager.instance().providerDelegate.uuids["\(previous)"]
         if (uuid != nil) {
             CallManager.instance().providerDelegate.uuids.removeValue(forKey: previous)
