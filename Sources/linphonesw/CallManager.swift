@@ -225,7 +225,7 @@ public protocol Logger {
         }
     }
 
-    public func displayIncomingCall(call:Call?, handle: String, hasVideo: Bool, callId: String, phoneNumber: String, displayName: String) {
+    public func displayIncomingCall(call:Call?, handle: String, hasVideo: Bool, callId: String, phoneNumber: String, displayName: String?) {
         let uuid = UUID()
         let callInfo = CallInfo.newIncomingCallInfo(callId: callId)
         callInfo.phoneNumber = phoneNumber
@@ -233,7 +233,7 @@ public protocol Logger {
 
         providerDelegate.callInfos.updateValue(callInfo, forKey: uuid)
         providerDelegate.uuids.updateValue(uuid, forKey: callId)
-        providerDelegate.reportIncomingCall(call:call, uuid: uuid, handle: handle, hasVideo: hasVideo, displayName: displayName)
+        providerDelegate.reportIncomingCall(call:call, uuid: uuid, handle: handle, hasVideo: hasVideo, phoneNumber: phoneNumber, displayName: displayName)
     }
 
     @objc func acceptCall(call: OpaquePointer?, hasVideo:Bool) {
@@ -541,8 +541,8 @@ public protocol Logger {
         return remoteAddress?.contains("focus") == true || remoteAddress?.contains("audiovideo") == true
     }
 
-    func incomingDisplayName(call:Call) -> String {
-        return "Unknown"
+    func incomingDisplayName(call:Call) -> String? {
+        return nil
         // let isConference = isConferenceCall(call: call)
         // let isEarlyConference = isConference && CallsViewModel.shared.currentCallData.value??.isConferenceCall.value != true // Conference info not be received yet.
         // if (isConference) {
@@ -612,7 +612,7 @@ public protocol Logger {
                     if (uuid != nil) {
                         let callInfo = CallManager.instance().providerDelegate.callInfos[uuid!]
                         // Tha app is now registered, updated the call already existed.
-                        CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: callInfo?.displayName ?? "Unknown")
+                        CallManager.instance().providerDelegate.updateCall(uuid: uuid!, handle: addr!.asStringUriOnly(), hasVideo: video, displayName: callInfo?.displayName)
                     } else {
 //                        let callInfo = CallManager.instance().providerDelegate.callInfos.values.first { $0.callId == callId }
 //                        CallManager.instance().displayIncomingCall(call: call, handle: addr!.asStringUriOnly(), hasVideo: video, callId: callId!, phoneNumber: callInfo?.phoneNumber ?? "", displayName: callInfo?.displayName ?? "Unknown")
@@ -621,7 +621,7 @@ public protocol Logger {
                     // not support callkit , use notif
                     let content = UNMutableNotificationContent()
                     content.title = NSLocalizedString("Incoming call", comment: "")
-                    content.body = displayName
+                    content.body = displayName ?? "Unknown"
                     content.sound = UNNotificationSound.init(named: UNNotificationSoundName.init("notes_of_the_optimistic.caf"))
                     content.categoryIdentifier = "call_cat"
                     content.userInfo = ["CallId" : callId!]
@@ -683,9 +683,8 @@ public protocol Logger {
 //                    }
 //                }
 //                break
-            case .End,
-                    .Error:
-                var displayName = "Unknown"
+            case .End, .Error:
+                var displayName: String? = nil
                 if (call.dir == .Incoming) {
                     displayName = incomingDisplayName(call: call)
                 }
@@ -706,7 +705,7 @@ public protocol Logger {
                     // Configure the notification's payload.
                     let content = UNMutableNotificationContent()
                     content.title = NSString.localizedUserNotificationString(forKey: NSLocalizedString("Missed call", comment: ""), arguments: nil)
-                    content.body = NSString.localizedUserNotificationString(forKey: displayName, arguments: nil)
+                    content.body = NSString.localizedUserNotificationString(forKey: displayName ?? "Unknown", arguments: nil)
 
                     // Deliver the notification.
                     let request = UNNotificationRequest(identifier: "call_request", content: content, trigger: nil) // Schedule the notification.

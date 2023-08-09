@@ -92,11 +92,17 @@ public class ProviderDelegate: NSObject {
         shared.provider.configuration = ProviderDelegate.providerConfiguration
     }
 
-    func reportIncomingCall(call:Call?, uuid: UUID, handle: String, hasVideo: Bool, displayName:String) {
+    func reportIncomingCall(call:Call?, uuid: UUID, handle: String, hasVideo: Bool, phoneNumber: String, displayName: String?) {
         let update = CXCallUpdate()
-        update.remoteHandle = CXHandle(type:.generic, value: handle)
         update.hasVideo = hasVideo
-        update.localizedCallerName = displayName
+
+        if let displayName = displayName {
+            update.remoteHandle = CXHandle(type: .generic, value: handle)
+            update.localizedCallerName = displayName
+        } else {
+            update.remoteHandle = CXHandle(type: .phoneNumber, value: phoneNumber)
+            update.hasVideo = hasVideo
+        }
 
         let callInfo = callInfos[uuid]
         let callId = callInfo?.callId
@@ -127,12 +133,17 @@ public class ProviderDelegate: NSObject {
         }
     }
 
-    func updateCall(uuid: UUID, handle: String, hasVideo: Bool = false, displayName:String) {
+    func updateCall(uuid: UUID, handle: String, hasVideo: Bool = false, displayName: String?) {
+        guard let displayName = displayName else {
+            return
+        }
+
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type:.generic, value:handle)
         update.localizedCallerName = displayName
         update.hasVideo = hasVideo
-        provider.reportCall(with:uuid, updated:update);
+
+        provider.reportCall(with: uuid, updated: update)
     }
 
     func reportOutgoingCallStartedConnecting(uuid:UUID) {
@@ -275,10 +286,12 @@ extension ProviderDelegate: CXProviderDelegate {
 
             let uuid = action.callUUID
             let callInfo = callInfos[uuid]
-            let update = CXCallUpdate()
-            update.remoteHandle = action.handle
-            update.localizedCallerName = callInfo?.displayName
-            self.provider.reportCall(with: action.callUUID, updated: update)
+
+            // We don't need to update display name
+//            let update = CXCallUpdate()
+//            update.remoteHandle = action.handle
+//            update.localizedCallerName = callInfo?.displayName
+//            self.provider.reportCall(with: action.callUUID, updated: update)
 
             let addr = callInfo?.toAddr
             if (addr == nil) {
