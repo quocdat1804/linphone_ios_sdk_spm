@@ -22,14 +22,11 @@ let package = Package(
             dependencies: [
                 "linphone",
                 "bctoolbox-ios",
-                "bctoolbox-tester",
                 "bctoolbox",
                 "belcard",
                 "belr",
                 "belle-sip",
                 "lime",
-                "limetester",
-                "linphonetester",
                 "mediastreamer2",
                 "msamr",
                 "mscodec2",
@@ -47,10 +44,6 @@ let package = Package(
         .binaryTarget(
             name: "bctoolbox-ios",
             path: "XCFrameworks/bctoolbox-ios.xcframework"
-        ),
-        .binaryTarget(
-            name: "bctoolbox-tester",
-            path: "XCFrameworks/bctoolbox-tester.xcframework"
         ),
         .binaryTarget(
             name: "bctoolbox",
@@ -71,14 +64,6 @@ let package = Package(
         .binaryTarget(
             name: "lime",
             path: "XCFrameworks/lime.xcframework"
-        ),
-        .binaryTarget(
-            name: "limetester",
-            path: "XCFrameworks/limetester.xcframework"
-        ),
-        .binaryTarget(
-            name: "linphonetester",
-            path: "XCFrameworks/linphonetester.xcframework"
         ),
         .binaryTarget(
             name: "mediastreamer2",
