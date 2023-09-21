@@ -11826,6 +11826,19 @@ public class CallStats : LinphoneObject
 			return result
 
 	}
+
+// TN hack
+    public var sentPackets: UInt
+    {
+        return UInt(linphone_call_stats_get_sent_packets(cPtr))
+    }
+
+    public var receivedPackets: UInt
+    {
+        return UInt(linphone_call_stats_get_recv_packets(cPtr))
+    }
+// TN hack
+
 	}
 
 /// An chat message is the object that is sent or received through a `ChatRoom`. 

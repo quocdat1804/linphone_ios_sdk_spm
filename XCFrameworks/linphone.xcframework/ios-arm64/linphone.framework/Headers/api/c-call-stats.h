@@ -148,6 +148,11 @@ LINPHONE_PUBLIC float linphone_call_stats_get_download_bandwidth (const Linphone
  */
 LINPHONE_PUBLIC float linphone_call_stats_get_upload_bandwidth (const LinphoneCallStats *stats);
 
+// TN hack
+LINPHONE_PUBLIC unsigned int linphone_call_stats_get_sent_packets (const LinphoneCallStats *stats);
+LINPHONE_PUBLIC unsigned int linphone_call_stats_get_recv_packets (const LinphoneCallStats *stats);
+// TN hack
+
 /**
  * Get the bandwidth measurement of the received RTCP, expressed in kbit/s, including IP/UDP/RTP headers.
  * @param stats #LinphoneCallStats object @notnil
