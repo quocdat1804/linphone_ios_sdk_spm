@@ -40,7 +40,7 @@ mkdir -p build/ && cd build/
 ### Standard cmake build steps, with an additional copy step at the end, this is a one-liner that can be re-run to re-build and copy
 
 ```
-cmake .. -G Ninja -DLINPHONESDK_PLATFORM=IOS -DCMAKE_BUILD_TYPE=Release \
+cmake .. -G Ninja -DLINPHONESDK_PLATFORM=IOS -DCMAKE_BUILD_TYPE=Release -DENABLE_GPL_THIRD_PARTIES=NO \
 && cmake --build . --parallel 4 \
 && rm -rf linphone-sdk-ios-${LINPHONE_VERSION} \
 && unzip -d linphone-sdk-ios-${LINPHONE_VERSION} linphone-sdk-ios-${LINPHONE_VERSION}.zip \
