@@ -27,8 +27,7 @@ export LINPHONE_VERSION=$(git describe --tags --exact-match)
 ### Apply patches as needed
 
 ```
-patch --strip=1 --forward --input ${PATH_TO_SPM_DIR}/tcp_to_tls_rewrite_hack.patch
-patch --strip=1 --forward --input ${PATH_TO_SPM_DIR}/expose_packet_counts.patch
+for p in ${PATH_TO_SPM_DIR}/*.patch; do patch --strip=1 --forward --input $p; done
 ```
 
 ### Create cmake build dir
