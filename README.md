@@ -39,13 +39,13 @@ mkdir -p build/ && cd build/
 ### Standard cmake build steps, with an additional copy step at the end, this is a one-liner that can be re-run to re-build and copy
 
 ```
-cmake .. -G Ninja -DLINPHONESDK_PLATFORM=IOS -DCMAKE_BUILD_TYPE=Release -DENABLE_GPL_THIRD_PARTIES=NO \
+cmake .. -G Ninja -DLINPHONESDK_PLATFORM=IOS -DCMAKE_BUILD_TYPE=Release -DENABLE_GPL_THIRD_PARTIES=NO -DENABLE_VIDEO=NO \
 && cmake --build . --parallel 4 \
 && rm -rf linphone-sdk-ios-${LINPHONE_VERSION} \
 && unzip -d linphone-sdk-ios-${LINPHONE_VERSION} linphone-sdk-ios-${LINPHONE_VERSION}.zip \
 && rm -rf ${PATH_TO_SPM_DIR}/XCFrameworks/ \
-&& cp -vrf linphone-sdk-ios-${LINPHONE_VERSION}/linphone-sdk/apple-darwin/XCFrameworks/ ${PATH_TO_SPM_DIR}/XCFrameworks/ \
-&& cp -vrf linphone-sdk-ios-${LINPHONE_VERSION}/linphone-sdk/apple-darwin/share/linphonesw/* ${PATH_TO_SPM_DIR}/Sources/linphonesw/
+&& cp -vrf linphone-sdk-ios-${LINPHONE_VERSION}/linphone-sdk*/apple-darwin/XCFrameworks/ ${PATH_TO_SPM_DIR}/XCFrameworks/ \
+&& cp -vrf linphone-sdk-ios-${LINPHONE_VERSION}/linphone-sdk*/apple-darwin/share/linphonesw/* ${PATH_TO_SPM_DIR}/Sources/linphonesw/
 ```
 
 ### Finally commit changes in the SPM repo and update Package.swift references as needed
